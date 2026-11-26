@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="名片轉VCF" />
+  <title>名片轉聯絡人 VCF</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    :root {
+      --bg: #f2f2f7;
+      --card: #ffffff;
+      --primary: #007aff;
+      --success: #34c759;
+      --text: #1c1c1e;
+      --sub: #6e6e73;
+      --border: #e5e5ea;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    .container { max-width: 540px; margin: 0 auto; padding-bottom: 40px; }
+    h1 { font-size: 22px; font-weight: 700; margin: 4px 0 16px; text-align: center; }
+    .box {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .step-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    textarea {
+      width: 100%;
+      height: 130px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      resize: vertical;
+      background: #fafafa;
+    }
+    textarea:focus { outline: none; border-color: var(--primary); background: #fff; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      padding: 13px 16px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      text-decoration: none;
+    }
+    .btn:active { opacity: 0.75; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-secondary {
+      background: #e8f2ff;
+      color: var(--primary);
+      padding: 8px 12px;
+      font-size: 13px;
+      width: auto;
+      border-radius: 8px;
+    }
+    .btn-share {
+      background: #f2f2f7;
+      color: var(--primary);
+      margin-top: 10px;
+      font-size: 14px;
+      padding: 10px;
+    }
+    .btn-success { background: var(--success); color: #fff; margin-top: 10px; }
+    .file-label {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 2px dashed #c7c7cc;
+      border-radius: 12px;
+      padding: 20px 12px;
+      text-align: center;
+      color: var(--sub);
+      font-size: 14px;
+      cursor: pointer;
+      background: #fafafa;
+    }
+    .file-label.has-file { border-color: var(--primary); background: #f0f7ff; color: var(--text); }
+    input[type="file"] { display: none; }
+    .status { font-size: 13px; color: var(--sub); margin-top: 8px; text-align: center; }
+    .result-card {
+      background: var(--card);
+      border-radius: 14px;
+      padding: 16px;
+      margin-top: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .avatar-preview {
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      object-fit: cover;
+      margin-bottom: 12px;
+      background: #fff;
+    }
+    .contact-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .contact-meta { font-size: 13px; color: var(--sub); text-align: center; margin-bottom: 6px; }
+    .privacy-note { font-size: 12px; color: var(--sub); text-align: center; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📇 名片轉聯絡人 VCF</h1>
+
+    <div class="box">
+      <div class="step-title">
+        <span>1. 選擇掃描的 PDF 或照片（支援多頁批次）</span>
+      </div>
+      <label class="file-label" id="fileLabel" for="fileInput">
+        <span style="font-size: 26px; margin-bottom: 4px;">📄</span>
+        <span id="fileText">點此從「iCloud 雲碟 &gt; cards」選取檔案</span>
+      </label>
+      <input type="file" id="fileInput" multiple accept=".pdf,image/*" />
+      <button class="btn btn-share" id="shareBtn" type="button" style="display: none;">
+        📤 傳送檔案至 Gemini 辨識
+      </button>
+    </div>
+
+    <div class="box">
+      <div class="step-title">
+        <span>2. 貼上 Gemini 產出的 JSON</span>
+        <button class="btn btn-secondary" id="pasteBtn" type="button">📋 一鍵貼上</button>
+      </div>
+      <textarea id="jsonInput" placeholder='請貼上 [ { "first_name": "...", ... } ]'></textarea>
+    </div>
+
+    <button class="btn btn-primary" id="generateBtn" type="button">產生聯絡人 VCF</button>
+    <div class="status" id="statusText"></div>
+
+    <div id="results"></div>
+
+    <div class="privacy-note">
+      🔒 所有 PDF 拆頁與聯絡人封裝皆在手機本地瀏覽器完成，資料絕不上傳任何伺服器。
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    const jsonInput = document.getElementById("jsonInput");
+    const fileInput = document.getElementById("fileInput");
+    const fileLabel = document.getElementById("fileLabel");
+    const fileText = document.getElementById("fileText");
+    const shareBtn = document.getElementById("shareBtn");
+    const pasteBtn = document.getElementById("pasteBtn");
+    const generateBtn = document.getElementById("generateBtn");
+    const statusText = document.getElementById("statusText");
+    const resultsDiv = document.getElementById("results");
+
+    fileInput.addEventListener("change", () => {
+      const files = Array.from(fileInput.files || []);
+      if (files.length > 0) {
+        fileLabel.classList.add("has-file");
+        fileText.textContent = `已選取 ${files.length} 個檔案：${files.map(f => f.name).join(", ")}`;
+        if (navigator.canShare && navigator.canShare({ files })) {
+          shareBtn.style.display = "inline-flex";
+        }
+      } else {
+        fileLabel.classList.remove("has-file");
+        fileText.textContent = "點此從「iCloud 雲碟 > cards」選取檔案";
+        shareBtn.style.display = "none";
+      }
+    });
+
+    shareBtn.addEventListener("click", async () => {
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) return;
+      try {
+        await navigator.share({
+          files,
+          title: "建立名片聯絡人",
+          text: "建立聯絡人"
+        });
+      } catch (err) {
+        if (err.name !== "AbortError") {
+          statusText.textContent = "分享取消或裝置不支援直接分享檔案";
+        }
+      }
+    });
+
+    pasteBtn.addEventListener("click", async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          jsonInput.value = text;
+          statusText.textContent = "已貼上剪貼簿內容";
+        }
+      } catch (err) {
+        jsonInput.focus();
+        statusText.textContent = "請長按輸入框選擇「貼上」";
+      }
+    });
+
+    // 將單頁/多頁 PDF 與圖片依序展開為頁面清單
+    async function buildPageItems(files) {
+      const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
+      const items = [];
+      for (const file of sorted) {
+        if (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+            items.push({ type: "pdf", pdf, pageNum, fileName: file.name });
+          }
+        } else {
+          items.push({ type: "image", file, fileName: file.name });
+        }
+      }
+      return items;
+    }
+
+    async function renderPageItem(item) {
+      if (item.type === "pdf") {
+        const page = await item.pdf.getPage(item.pageNum);
+        const origViewport = page.getViewport({ scale: 1.0 });
+        const maxSide = Math.max(origViewport.width, origViewport.height);
+        const scale = Math.max(2.0, 2400 / maxSide);
+        const viewport = page.getViewport({ scale });
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        const ctx = canvas.getContext("2d");
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        return canvas;
+      } else {
+        return new Promise((resolve, reject) => {
+          const url = URL.createObjectURL(item.file);
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+            resolve(canvas);
+          };
+          img.onerror = reject;
+          img.src = url;
+        });
+      }
+    }
+
+    function makeInscribedAvatar(sourceCanvas, canvasSize = 900) {
+      const w = sourceCanvas.width;
+      const h = sourceCanvas.height;
+      const diag = Math.hypot(w, h);
+      const targetDiag = canvasSize * 0.95;
+      const scale = targetDiag / diag;
+      const newW = Math.max(1, Math.round(w * scale));
+      const newH = Math.max(1, Math.round(h * scale));
+
+      const out = document.createElement("canvas");
+      out.width = canvasSize;
+      out.height = canvasSize;
+      const ctx = out.getContext("2d");
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvasSize, canvasSize);
+
+      const offsetX = Math.floor((canvasSize - newW) / 2);
+      const offsetY = Math.floor((canvasSize - newH) / 2);
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(sourceCanvas, offsetX, offsetY, newW, newH);
+
+      ctx.strokeStyle = "rgb(220, 220, 220)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(offsetX + 0.5, offsetY + 0.5, newW - 1, newH - 1);
+
+      const dataUrl = out.toDataURL("image/jpeg", 0.85);
+      const base64 = dataUrl.split(",")[1];
+      return { dataUrl, base64 };
+    }
+
+    function escapeVcardText(text) {
+      if (!text) return "";
+      return String(text)
+        .replace(/\\/g, "\\\\")
+        .replace(/;/g, "\\;")
+        .replace(/,/g, "\\,")
+        .replace(/\r\n/g, "\\n")
+        .replace(/\n/g, "\\n");
+    }
+
+    function foldVcardLine(line, limit = 75) {
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder("utf-8");
+      const raw = encoder.encode(line);
+      if (raw.length <= limit) return line;
+
+      const chunks = [];
+      let start = 0;
+      let first = true;
+      while (start < raw.length) {
+        const maxLen = first ? limit : limit - 1;
+        let end = Math.min(start + maxLen, raw.length);
+        while (end < raw.length && (raw[end] & 0xc0) === 0x80) {
+          end -= 1;
+        }
+        const part = decoder.decode(raw.slice(start, end));
+        chunks.push(first ? part : " " + part);
+        start = end;
+        first = false;
+      }
+      return chunks.join("\r\n");
+    }
+
+    function buildVcard(card, base64Photo) {
+      const firstName = (card.first_name || "").trim();
+      const lastName = (card.last_name || "").trim();
+      const company = (card.company || "").trim();
+      const department = (card.department || "").trim();
+      const mobile = (card.mobile || "").trim();
+      const workPhone = (card.work_phone || "").trim();
+      const address = (card.address || "").trim();
+      const email = (card.email || "").trim();
+
+      const lines = [
+        "BEGIN:VCARD",
+        "VERSION:3.0",
+        `N;CHARSET=UTF-8:${escapeVcardText(lastName)};${escapeVcardText(firstName)};;;`,
+        `FN;CHARSET=UTF-8:${escapeVcardText(firstName)}`
+      ];
+
+      if (company || department) {
+        lines.push(`ORG;CHARSET=UTF-8:${escapeVcardText(company)};${escapeVcardText(department)}`);
+      }
+      if (mobile) lines.push(`TEL;TYPE=CELL,VOICE:${mobile}`);
+      if (workPhone) lines.push(`TEL;TYPE=WORK,VOICE:${workPhone}`);
+      if (email) lines.push(`EMAIL;TYPE=INTERNET,WORK:${email}`);
+      if (address) lines.push(`ADR;TYPE=WORK;CHARSET=UTF-8:;;${escapeVcardText(address)};;;;`);
+      if (base64Photo) lines.push(`PHOTO;ENCODING=b;TYPE=JPEG:${base64Photo}`);
+
+      lines.push("END:VCARD");
+      return lines.map(l => foldVcardLine(l)).join("\r\n") + "\r\n";
+    }
+
+    function resolvePageItem(photoKey, pageItems) {
+      if (!pageItems.length) return null;
+      const key = String(photoKey || "").trim();
+      if (/^\d+$/.test(key)) {
+        const idx = parseInt(key, 10) - 1;
+        if (idx >= 0 && idx < pageItems.length) return pageItems[idx];
+      }
+      const lower = key.toLowerCase();
+      return pageItems.find(item =>
+        item.fileName.toLowerCase() === lower ||
+        item.fileName.toLowerCase().startsWith(lower + ".")
+      ) || pageItems[0];
+    }
+
+    generateBtn.addEventListener("click", async () => {
+      resultsDiv.innerHTML = "";
+      statusText.textContent = "";
+
+      let raw = jsonInput.value.trim();
+      raw = raw.replace(/^```(?:json)?\s*|\s*```$/gi, "");
+      if (!raw) {
+        statusText.textContent = "⚠️ 請先貼上 JSON 資料";
+        return;
+      }
+
+      let cards;
+      try {
+        cards = JSON.parse(raw);
+        if (!Array.isArray(cards)) cards = [cards];
+      } catch (e) {
+        statusText.textContent = "⚠️ JSON 格式錯誤，請確認有複製到完整的 [ ... ]";
+        return;
+      }
+
+      const files = Array.from(fileInput.files || []);
+      generateBtn.disabled = true;
+      statusText.textContent = "⏳ 正在解析多頁 PDF 與封裝獨立 VCF...";
+
+      try {
+        const pageItems = await buildPageItems(files);
+
+        for (let i = 0; i < cards.length; i++) {
+          const card = cards[i];
+          const name = (card.first_name || `contact_${i + 1}`).trim();
+          const matchedItem = resolvePageItem(card.photo || (i + 1), pageItems);
+
+          let avatar = null;
+          if (matchedItem) {
+            const srcCanvas = await renderPageItem(matchedItem);
+            avatar = makeInscribedAvatar(srcCanvas, 900);
+          }
+
+          const vcfContent = buildVcard(card, avatar ? avatar.base64 : null);
+          const blob = new Blob([vcfContent], { type: "text/vcard;charset=utf-8" });
+          const blobUrl = URL.createObjectURL(blob);
+
+          const cardEl = document.createElement("div");
+          cardEl.className = "result-card";
+          cardEl.innerHTML = `
+            ${avatar ? `<img class="avatar-preview" src="${avatar.dataUrl}" alt="大頭貼預覽" />` : ""}
+            <div class="contact-name">${name}</div>
+            <div class="contact-meta">${[card.company, card.department].filter(Boolean).join(" · ")}</div>
+            <div class="contact-meta">${[card.mobile, card.work_phone].filter(Boolean).join(" / ")}</div>
+            <a class="btn btn-success" href="${blobUrl}" download="${name}.vcf">📲 加入 iPhone / 系統聯絡人</a>
+          `;
+          resultsDiv.appendChild(cardEl);
+        }
+        statusText.textContent = `✅ 完成！共產出 ${cards.length} 筆聯絡人，請依序點擊下方綠色按鈕匯入`;
+      } catch (err) {
+        console.error(err);
+        statusText.textContent = "❌ 處理失敗：" + err.message;
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
