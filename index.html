@@ -125,7 +125,7 @@
       background: #fff;
     }
     .contact-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
-    .contact-meta { font-size: 13px; color: var(--sub); text-align: center; margin-bottom: 6px; }
+    .contact-meta { font-size: 13px; color: var(--sub); text-align: center; margin-bottom: 4px; }
     .privacy-note { font-size: 12px; color: var(--sub); text-align: center; margin-top: 16px; }
   </style>
 </head>
@@ -161,7 +161,7 @@
     <div id="results"></div>
 
     <div class="privacy-note">
-      🔒 所有 PDF 拆頁與聯絡人封裝皆在手機本地瀏覽器完成，資料絕不上傳任何伺服器。
+      🔒 PDF 拆頁與聯絡人封裝皆在本地瀏覽器完成，僅在郵遞區號未滿 6 碼時查詢郵政 API 補齊 3+3。
     </div>
   </div>
 
@@ -178,6 +178,7 @@
     const generateBtn = document.getElementById("generateBtn");
     const statusText = document.getElementById("statusText");
     const resultsDiv = document.getElementById("results");
+    const zipCache = new Map();
 
     fileInput.addEventListener("change", () => {
       const files = Array.from(fileInput.files || []);
@@ -223,7 +224,40 @@
       }
     });
 
-    // 將單頁/多頁 PDF 與圖片依序展開為頁面清單
+    function splitZipAndAddress(rawPostal, rawAddress) {
+      let postal = String(rawPostal || "").replace(/\D/g, "");
+      let addr = String(rawAddress || "").trim();
+
+      const leadingMatch = addr.match(/^(\d{3,6})[\s\-]*(.+)$/);
+      if (leadingMatch) {
+        if (!postal) postal = leadingMatch[1];
+        addr = leadingMatch[2].trim();
+      }
+      return { postal, addr };
+    }
+
+    async function resolveZip33(postal, addr) {
+      if (/^\d{6}$/.test(postal)) return postal;
+      if (!addr) return postal;
+      if (zipCache.has(addr)) return zipCache.get(addr);
+
+      try {
+        const url = `https://zip5.5432.tw/zip5json.py?adrs=${encodeURIComponent(addr)}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const z6 = String(data.zipcode6 || data.zipcode || "").replace(/\D/g, "");
+          if (z6.length >= 5) {
+            zipCache.set(addr, z6);
+            return z6;
+          }
+        }
+      } catch (e) {
+        console.warn("郵遞區號 API 查詢失敗，保留原值：", e);
+      }
+      return postal;
+    }
+
     async function buildPageItems(files) {
       const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
       const items = [];
@@ -340,14 +374,13 @@
       return chunks.join("\r\n");
     }
 
-    function buildVcard(card, base64Photo) {
+    function buildVcard(card, resolvedPostal, cleanAddress, base64Photo) {
       const firstName = (card.first_name || "").trim();
       const lastName = (card.last_name || "").trim();
       const company = (card.company || "").trim();
       const department = (card.department || "").trim();
       const mobile = (card.mobile || "").trim();
       const workPhone = (card.work_phone || "").trim();
-      const address = (card.address || "").trim();
       const email = (card.email || "").trim();
 
       const lines = [
@@ -363,7 +396,9 @@
       if (mobile) lines.push(`TEL;TYPE=CELL,VOICE:${mobile}`);
       if (workPhone) lines.push(`TEL;TYPE=WORK,VOICE:${workPhone}`);
       if (email) lines.push(`EMAIL;TYPE=INTERNET,WORK:${email}`);
-      if (address) lines.push(`ADR;TYPE=WORK;CHARSET=UTF-8:;;${escapeVcardText(address)};;;;`);
+      if (cleanAddress || resolvedPostal) {
+        lines.push(`ADR;TYPE=WORK;CHARSET=UTF-8:;;${escapeVcardText(cleanAddress)};;;${escapeVcardText(resolvedPostal)};`);
+      }
       if (base64Photo) lines.push(`PHOTO;ENCODING=b;TYPE=JPEG:${base64Photo}`);
 
       lines.push("END:VCARD");
@@ -406,7 +441,7 @@
 
       const files = Array.from(fileInput.files || []);
       generateBtn.disabled = true;
-      statusText.textContent = "⏳ 正在解析多頁 PDF 與封裝獨立 VCF...";
+      statusText.textContent = "⏳ 正在解析檔案、補齊 3+3 郵遞區號與封裝獨立 VCF...";
 
       try {
         const pageItems = await buildPageItems(files);
@@ -414,18 +449,21 @@
         for (let i = 0; i < cards.length; i++) {
           const card = cards[i];
           const name = (card.first_name || `contact_${i + 1}`).trim();
-          const matchedItem = resolvePageItem(card.photo || (i + 1), pageItems);
+          const { postal, addr } = splitZipAndAddress(card.postal_code, card.address);
+          const resolvedPostal = await resolveZip33(postal, addr);
 
+          const matchedItem = resolvePageItem(card.photo || (i + 1), pageItems);
           let avatar = null;
           if (matchedItem) {
             const srcCanvas = await renderPageItem(matchedItem);
             avatar = makeInscribedAvatar(srcCanvas, 900);
           }
 
-          const vcfContent = buildVcard(card, avatar ? avatar.base64 : null);
+          const vcfContent = buildVcard(card, resolvedPostal, addr, avatar ? avatar.base64 : null);
           const blob = new Blob([vcfContent], { type: "text/vcard;charset=utf-8" });
           const blobUrl = URL.createObjectURL(blob);
 
+          const addrDisplay = [resolvedPostal, addr].filter(Boolean).join(" ");
           const cardEl = document.createElement("div");
           cardEl.className = "result-card";
           cardEl.innerHTML = `
@@ -433,6 +471,7 @@
             <div class="contact-name">${name}</div>
             <div class="contact-meta">${[card.company, card.department].filter(Boolean).join(" · ")}</div>
             <div class="contact-meta">${[card.mobile, card.work_phone].filter(Boolean).join(" / ")}</div>
+            ${addrDisplay ? `<div class="contact-meta">📍 ${addrDisplay}</div>` : ""}
             <a class="btn btn-success" href="${blobUrl}" download="${name}.vcf">📲 加入 iPhone / 系統聯絡人</a>
           `;
           resultsDiv.appendChild(cardEl);
