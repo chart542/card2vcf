@@ -665,7 +665,7 @@
       const w = sourceCanvas.width;
       const h = sourceCanvas.height;
       const diag = Math.hypot(w, h);
-      const targetDiag = canvasSize * 0.95;
+      const targetDiag = canvasSize * 0.85;
       const scale = targetDiag / diag;
       const newW = Math.max(1, Math.round(w * scale));
       const newH = Math.max(1, Math.round(h * scale));
