@@ -323,10 +323,10 @@
       "5. 職稱 (title)：\n" +
       "   - 一律留空字串 \"\"（職稱已整合至 department 欄）。\n" +
       "6. 手機 (mobile)：\n" +
-      "   - 填入行動電話號碼，保留清楚易讀格式（例如「0912-345-678」）。\n" +
+      "   - 一律輸出全數字（去除括弧、橫槓與空格，例如「0912345678」；若有國際碼則保留開頭 +）。\n" +
       "7. 公司市話 (work_phone)：\n" +
-      "   - 若有分機，務必以「兩個半形逗號」串接，格式為「市話,,分機」（例如「03-5636688,,1234」或「02-2345-6789,,123」）。\n" +
-      "   - 無分機時直接填市話；沒有出現則留空字串 \"\"。\n" +
+      "   - 市話主號碼一律輸出全數字（去除括弧、橫槓與空格）；若有分機，務必以「兩個半形逗號」串接，格式為「全數字市話,,分機」（例如「035636688,,1234」或「0223456789,,123」）。\n" +
+      "   - 無分機時直接填全數字市話；沒有出現則留空字串 \"\"。\n" +
       "8. 郵遞區號 (postal_code)：\n" +
       "   - 獨立欄位，專放 3+3 六碼（或名片上標示的 3~6 碼）台灣郵遞區號數字；若名片未標示則留空字串 \"\"（後續由程式自動查詢補齊）。\n" +
       "9. 地址 (address)：\n" +
@@ -462,19 +462,32 @@
       }
     });
 
+    function normalizeDigitsPhoneBase(raw) {
+      let text = String(raw || "").trim();
+      if (!text) return "";
+      const hasPlus = text.startsWith("+");
+      if (hasPlus) {
+        text = text.replace(/^\+886[\s\-]*\(\s*0\s*\)/, "+886");
+      }
+      const digits = text.replace(/\D/g, "");
+      if (!digits) return String(raw || "").trim();
+      return (hasPlus ? "+" : "") + digits;
+    }
+
+    function normalizeMobilePhone(raw) {
+      return normalizeDigitsPhoneBase(raw);
+    }
+
     function normalizeWorkPhone(raw) {
       const text = String(raw || "").trim();
       if (!text) return "";
-      if (text.includes(",,")) {
-        return text.replace(/\s*,,\s*/g, ",,");
-      }
-      const match = text.match(/^(.+?)\s*(?:#|ext\.?|extension|分機|轉)\s*([0-9]+)\s*$/i);
+      const match = text.match(/^(.+?)\s*(?:,,|,|#|ext\.?|extension|分機|轉)\s*([0-9]+)\s*$/i);
       if (match) {
-        const baseNum = match[1].trim().replace(/[,\-]+$/, "");
+        const baseNum = normalizeDigitsPhoneBase(match[1].trim().replace(/[,\-]+$/, ""));
         const ext = match[2].trim();
         return `${baseNum},,${ext}`;
       }
-      return text;
+      return normalizeDigitsPhoneBase(text);
     }
 
     function splitZipAndAddress(rawPostal, rawAddress) {
@@ -526,6 +539,7 @@
       }
       normalized.department = dept;
       normalized.title = "";
+      normalized.mobile = normalizeMobilePhone(normalized.mobile);
       normalized.work_phone = normalizeWorkPhone(normalized.work_phone);
 
       const { postal, addr } = splitZipAndAddress(normalized.postal_code, normalized.address);
@@ -665,7 +679,7 @@
       const w = sourceCanvas.width;
       const h = sourceCanvas.height;
       const diag = Math.hypot(w, h);
-      const targetDiag = canvasSize * 0.85;
+      const targetDiag = canvasSize * 0.80;
       const scale = targetDiag / diag;
       const newW = Math.max(1, Math.round(w * scale));
       const newH = Math.max(1, Math.round(h * scale));
