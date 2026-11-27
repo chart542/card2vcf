@@ -15,7 +15,6 @@
       --primary: #007aff;
       --success: #34c759;
       --warning: #ff9500;
-      --danger: #ff3b30;
       --text: #1c1c1e;
       --sub: #6e6e73;
       --border: #e5e5ea;
@@ -59,7 +58,7 @@
       color: var(--text);
     }
     textarea {
-      height: 140px;
+      height: 145px;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 12px;
       resize: vertical;
@@ -120,6 +119,28 @@
       border: 1px solid var(--primary);
       margin-top: 10px;
     }
+    .btn-english {
+      background: #fff6e5;
+      color: #b25e00;
+      border: 1px solid #ffd584;
+      margin-top: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+    .btn-rotate {
+      background: #f2f2f7;
+      color: var(--text);
+      border: 1px solid var(--border);
+      margin-top: 8px;
+      padding: 8px 12px;
+      font-size: 13px;
+      width: auto;
+    }
+    .picker-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
     .file-label {
       display: flex;
       flex-direction: column;
@@ -127,14 +148,28 @@
       justify-content: center;
       border: 2px dashed #c7c7cc;
       border-radius: 12px;
-      padding: 20px 12px;
+      padding: 16px 10px;
       text-align: center;
       color: var(--sub);
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
       background: #fafafa;
+      min-height: 92px;
+    }
+    .file-label.camera-label {
+      border-color: #a8c7fa;
+      background: #f5f9ff;
+      color: var(--primary);
+      font-weight: 600;
     }
     .file-label.has-file { border-color: var(--primary); background: #f0f7ff; color: var(--text); }
+    .selected-summary {
+      font-size: 12px;
+      color: var(--sub);
+      margin-top: 8px;
+      text-align: center;
+      word-break: break-all;
+    }
     input[type="file"] { display: none; }
     .status {
       font-size: 13px;
@@ -195,13 +230,21 @@
 
     <div class="box">
       <div class="step-title">
-        <span>1. 選擇掃描的 PDF 或照片（支援多頁批次）</span>
+        <span>1. 選取 PDF / 圖片，或直接拍照</span>
       </div>
-      <label class="file-label" id="fileLabel" for="fileInput">
-        <span style="font-size: 26px; margin-bottom: 4px;">📄</span>
-        <span id="fileText">點此從「iCloud 雲碟 &gt; cards」或相簿選取檔案</span>
-      </label>
+      <div class="picker-grid">
+        <label class="file-label" id="fileLabel" for="fileInput">
+          <span style="font-size: 24px; margin-bottom: 4px;">📄</span>
+          <span>選取 PDF / 相簿<br />（iCloud 雲碟 &gt; cards）</span>
+        </label>
+        <label class="file-label camera-label" id="cameraLabel" for="cameraInput">
+          <span style="font-size: 24px; margin-bottom: 4px;">📷</span>
+          <span>直接拍照<br />（自動裁背景＋可旋轉）</span>
+        </label>
+      </div>
+      <div class="selected-summary" id="fileText">尚未選取檔案（支援多頁 PDF 批次處理）</div>
       <input type="file" id="fileInput" multiple accept=".pdf,image/*" />
+      <input type="file" id="cameraInput" accept="image/*" capture="environment" />
 
       <button class="btn btn-ai" id="ocrBtn" type="button">
         🤖 使用 Gemini 自動辨識並產出 VCF
@@ -213,10 +256,10 @@
 
     <div class="box">
       <div class="step-title">
-        <span>2. 辨識結果 JSON（可微調或手動貼上）</span>
+        <span>2. 辨識結果 JSON（已套用欄位正規化，可微調或貼上）</span>
         <button class="btn btn-secondary" id="pasteBtn" type="button">📋 一鍵貼上</button>
       </div>
-      <textarea id="jsonInput" placeholder='使用上方「自動辨識」會自動填入，或手動貼上 [ { "first_name": "...", ... } ]'></textarea>
+      <textarea id="jsonInput" placeholder='使用上方「自動辨識」會自動填入，或手動貼上 [ { "first_name": "台積電-王小明", ... } ]'></textarea>
       <button class="btn btn-primary" id="generateBtn" type="button" style="margin-top: 10px;">
         產生 / 更新聯絡人 VCF
       </button>
@@ -227,7 +270,7 @@
     <div id="results"></div>
 
     <div class="privacy-note">
-      🔒 PDF 拆頁、縮圖壓縮與 VCF 封裝皆在您的瀏覽器本地執行；使用自動辨識時，壓縮影像將直接送往 Google Gemini API，不經由任何第三方伺服器。
+      🔒 PDF 拆頁、縮圖壓縮與 VCF 封裝皆在本地瀏覽器完成；僅在使用自動辨識時將壓縮影像送往 Google Gemini API，並在郵遞區號未滿 6 碼時查詢郵政 API（zip5.5432.tw）補齊 3+3。
     </div>
   </div>
 
@@ -237,6 +280,7 @@
 
     const STORAGE_KEY = "card2vcf_gemini_api_key";
     const STORAGE_MODEL = "card2vcf_gemini_model";
+    const zipCache = new Map();
 
     const apiKeyInput = document.getElementById("apiKeyInput");
     const keyBadge = document.getElementById("keyBadge");
@@ -245,10 +289,13 @@
     const modelSelect = document.getElementById("modelSelect");
 
     const fileInput = document.getElementById("fileInput");
+    const cameraInput = document.getElementById("cameraInput");
     const fileLabel = document.getElementById("fileLabel");
+    const cameraLabel = document.getElementById("cameraLabel");
     const fileText = document.getElementById("fileText");
     const ocrBtn = document.getElementById("ocrBtn");
     const shareBtn = document.getElementById("shareBtn");
+    let selectedFiles = [];
 
     const jsonInput = document.getElementById("jsonInput");
     const pasteBtn = document.getElementById("pasteBtn");
@@ -257,14 +304,39 @@
     const batchDownloadArea = document.getElementById("batchDownloadArea");
     const resultsDiv = document.getElementById("results");
 
-    const OCR_PROMPT =
-      "請辨識圖片中的所有名片資訊，並精準分類填入欄位。" +
-      "若有中文姓名，請將姓氏填入 last_name、名字填入 first_name" +
-      "（若不確定如何拆姓氏，請將完整姓名填入 first_name，last_name 留空）；" +
-      "若為英文姓名，名填 first_name、姓填 last_name；" +
-      "若同一張名片同時有中英文姓名，中文放 last_name/first_name，英文名請填入 notes。" +
-      "電話請保留完整區碼或國際碼；傳真填 fax、公司市話填 work_phone、手機填 mobile。" +
-      "沒有出現的欄位請留空字串，不要自行編造。";
+    const SKILL_SYSTEM_INSTRUCTION =
+      "你是一位專精於台灣與國際商務名片的 OCR 與欄位正規化專家。\n" +
+      "請從上傳的名片影像中擷取完整資訊，並「嚴格遵守」以下 10 項欄位規則（確保手機撥號、Google 聯絡人與 Outlook 搜尋顯示完全一致）：\n\n" +
+      "1. 名字 (first_name)：\n" +
+      "   - 格式必須為「公司簡稱-姓名」，例如：「台積電-王小明」。\n" +
+      "   - 公司簡稱取台灣業界常用簡稱（如台灣積體電路製造股份有限公司 -> 台積電、鴻海精密 -> 鴻海），或去除「股份」「有限」「公司」「企業」「集團」後的核心名稱。\n" +
+      "   - 若名片同時有中文名與英文名：first_name 預設只保留中文名（例如「台積電-王小明」），並把英文名另外填到 english_name 欄位（不要直接併入 first_name）。\n" +
+      "   - 若為純英文名片（無中文姓名），first_name 直接填入「公司簡稱-英文名」或「英文名」。\n" +
+      "2. 姓氏 (last_name)：\n" +
+      "   - 一律留空字串 \"\"，絕對不可拆分姓氏，避免影響「公司簡稱-姓名」的排序與顯示。\n" +
+      "3. 公司 (company)：\n" +
+      "   - 填入名片上的完整公司全銜，例如「台灣積體電路製造股份有限公司」。\n" +
+      "4. 部門 (department)：\n" +
+      "   - 格式必須為「部門-職稱」，例如：「3D IC 製造部門-經理」。\n" +
+      "   - 若名片僅有職稱無部門，直接填職稱於此欄（如「經理」）。\n" +
+      "   - 若僅有部門無職稱，直接填部門（如「3D IC 製造部門」）。\n" +
+      "5. 職稱 (title)：\n" +
+      "   - 一律留空字串 \"\"（職稱已整合至 department 欄）。\n" +
+      "6. 手機 (mobile)：\n" +
+      "   - 填入行動電話號碼，保留清楚易讀格式（例如「0912-345-678」）。\n" +
+      "7. 公司市話 (work_phone)：\n" +
+      "   - 若有分機，務必以「兩個半形逗號」串接，格式為「市話,,分機」（例如「03-5636688,,1234」或「02-2345-6789,,123」）。\n" +
+      "   - 無分機時直接填市話；沒有出現則留空字串 \"\"。\n" +
+      "8. 郵遞區號 (postal_code)：\n" +
+      "   - 獨立欄位，專放 3+3 六碼（或名片上標示的 3~6 碼）台灣郵遞區號數字；若名片未標示則留空字串 \"\"（後續由程式自動查詢補齊）。\n" +
+      "9. 地址 (address)：\n" +
+      "   - 僅保留「不含郵遞區號」的純地址（務必剝離地址開頭的郵遞區號數字）。\n" +
+      "10. Email (email)：\n" +
+      "   - 填入完整電子郵件。\n" +
+      "11. 英文名備註 (english_name)：\n" +
+      "   - 僅當名片同時有中文名與英文名時，將英文名（如「Kevin」或「Jason Lin」）填於此欄以供確認表顯示；其餘情況留空字串 \"\"。\n" +
+      "12. 名片裁切框 (box_2d)：\n" +
+      "   - 以原圖的 0~1000 正規化座標 [ymin, xmin, ymax, xmax] 標出名片本體四邊範圍，用來裁掉周圍雜亂背景；若整張圖已幾乎是滿版名片（例如掃描 PDF），填 [0, 0, 1000, 1000]。";
 
     const RESPONSE_SCHEMA = {
       type: "OBJECT",
@@ -281,15 +353,16 @@
               title: { type: "STRING" },
               mobile: { type: "STRING" },
               work_phone: { type: "STRING" },
-              fax: { type: "STRING" },
-              email: { type: "STRING" },
-              website: { type: "STRING" },
+              postal_code: { type: "STRING" },
               address: { type: "STRING" },
-              notes: { type: "STRING" }
+              email: { type: "STRING" },
+              english_name: { type: "STRING" },
+              box_2d: { type: "ARRAY", items: { type: "INTEGER" } }
             },
             required: [
               "first_name", "last_name", "company", "department", "title",
-              "mobile", "work_phone", "fax", "email", "website", "address", "notes"
+              "mobile", "work_phone", "postal_code", "address", "email", "english_name",
+              "box_2d"
             ]
           }
         }
@@ -337,27 +410,35 @@
 
     syncKeyUI();
 
-    fileInput.addEventListener("change", () => {
-      const files = Array.from(fileInput.files || []);
-      if (files.length > 0) {
-        fileLabel.classList.add("has-file");
-        fileText.textContent = `已選取 ${files.length} 個檔案：${files.map(f => f.name).join(", ")}`;
-        if (navigator.canShare && navigator.canShare({ files })) {
+    function updateSelectedFiles(files, sourceType) {
+      selectedFiles = Array.from(files || []);
+      fileLabel.classList.remove("has-file");
+      cameraLabel.classList.remove("has-file");
+
+      if (selectedFiles.length > 0) {
+        if (sourceType === "camera") {
+          cameraLabel.classList.add("has-file");
+        } else {
+          fileLabel.classList.add("has-file");
+        }
+        fileText.textContent = `已選取 ${selectedFiles.length} 個檔案：${selectedFiles.map(f => f.name).join(", ")}`;
+        if (navigator.canShare && navigator.canShare({ files: selectedFiles })) {
           shareBtn.style.display = "inline-flex";
         }
       } else {
-        fileLabel.classList.remove("has-file");
-        fileText.textContent = "點此從「iCloud 雲碟 > cards」或相簿選取檔案";
+        fileText.textContent = "尚未選取檔案（支援多頁 PDF 批次處理）";
         shareBtn.style.display = "none";
       }
-    });
+    }
+
+    fileInput.addEventListener("change", () => updateSelectedFiles(fileInput.files, "file"));
+    cameraInput.addEventListener("change", () => updateSelectedFiles(cameraInput.files, "camera"));
 
     shareBtn.addEventListener("click", async () => {
-      const files = Array.from(fileInput.files || []);
-      if (!files.length) return;
+      if (!selectedFiles.length) return;
       try {
         await navigator.share({
-          files,
+          files: selectedFiles,
           title: "建立名片聯絡人",
           text: "建立聯絡人"
         });
@@ -380,6 +461,81 @@
         statusText.textContent = "請長按輸入框選擇「貼上」";
       }
     });
+
+    function normalizeWorkPhone(raw) {
+      const text = String(raw || "").trim();
+      if (!text) return "";
+      if (text.includes(",,")) {
+        return text.replace(/\s*,,\s*/g, ",,");
+      }
+      const match = text.match(/^(.+?)\s*(?:#|ext\.?|extension|分機|轉)\s*([0-9]+)\s*$/i);
+      if (match) {
+        const baseNum = match[1].trim().replace(/[,\-]+$/, "");
+        const ext = match[2].trim();
+        return `${baseNum},,${ext}`;
+      }
+      return text;
+    }
+
+    function splitZipAndAddress(rawPostal, rawAddress) {
+      let postal = String(rawPostal || "").replace(/\D/g, "");
+      let addr = String(rawAddress || "").trim();
+
+      const leadingMatch = addr.match(/^(\d{3,6})[\s\-]*(.+)$/);
+      if (leadingMatch) {
+        if (!postal) postal = leadingMatch[1];
+        addr = leadingMatch[2].trim();
+      }
+      return { postal, addr };
+    }
+
+    async function resolveZip33(postal, addr) {
+      if (/^\d{6}$/.test(postal)) return postal;
+      if (!addr) return postal;
+      if (zipCache.has(addr)) return zipCache.get(addr);
+
+      try {
+        const url = `https://zip5.5432.tw/zip5json.py?adrs=${encodeURIComponent(addr)}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          const z6 = String(data.zipcode6 || data.zipcode || "").replace(/\D/g, "");
+          if (z6.length >= 5) {
+            zipCache.set(addr, z6);
+            return z6;
+          }
+        }
+      } catch (e) {
+        console.warn("郵遞區號 API 查詢失敗，保留原值：", e);
+      }
+      return postal;
+    }
+
+    function normalizeCardBySkill(card) {
+      const normalized = { ...card };
+      normalized.last_name = "";
+
+      let dept = String(normalized.department || "").trim();
+      const title = String(normalized.title || "").trim();
+      if (title) {
+        if (dept && !dept.includes(title)) {
+          dept = `${dept}-${title}`;
+        } else if (!dept) {
+          dept = title;
+        }
+      }
+      normalized.department = dept;
+      normalized.title = "";
+      normalized.work_phone = normalizeWorkPhone(normalized.work_phone);
+
+      const { postal, addr } = splitZipAndAddress(normalized.postal_code, normalized.address);
+      normalized.postal_code = postal;
+      normalized.address = addr;
+      if (normalized.rotate_deg === undefined || normalized.rotate_deg === null) {
+        normalized.rotate_deg = 0;
+      }
+      return normalized;
+    }
 
     async function buildPageItems(files) {
       const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
@@ -450,6 +606,61 @@
       return dataUrl.split(",")[1];
     }
 
+    function cropAndOrientCanvas(sourceCanvas, box2d, rotateDeg = 0) {
+      let working = sourceCanvas;
+      if (Array.isArray(box2d) && box2d.length === 4) {
+        const [ymin, xmin, ymax, xmax] = box2d.map(Number);
+        const boxW = xmax - xmin;
+        const boxH = ymax - ymin;
+        const areaRatio = (boxW * boxH) / 1000000;
+        if (
+          Number.isFinite(ymin) && Number.isFinite(xmin) &&
+          Number.isFinite(ymax) && Number.isFinite(xmax) &&
+          ymin >= 0 && xmin >= 0 && ymax <= 1000 && xmax <= 1000 &&
+          boxW >= 150 && boxH >= 150 && areaRatio < 0.88
+        ) {
+          const pad = 15;
+          const py1 = Math.max(0, ymin - pad);
+          const px1 = Math.max(0, xmin - pad);
+          const py2 = Math.min(1000, ymax + pad);
+          const px2 = Math.min(1000, xmax + pad);
+          const sw = working.width;
+          const sh = working.height;
+          const sx = Math.round((sw * px1) / 1000);
+          const sy = Math.round((sh * py1) / 1000);
+          const cw = Math.round((sw * (px2 - px1)) / 1000);
+          const ch = Math.round((sh * (py2 - py1)) / 1000);
+          if (cw > 20 && ch > 20) {
+            const cropped = document.createElement("canvas");
+            cropped.width = cw;
+            cropped.height = ch;
+            const cctx = cropped.getContext("2d");
+            cctx.drawImage(working, sx, sy, cw, ch, 0, 0, cw, ch);
+            working = cropped;
+          }
+        }
+      }
+
+      const deg = ((Number(rotateDeg) || 0) % 360 + 360) % 360;
+      if (deg === 0) return working;
+
+      const rot = document.createElement("canvas");
+      const w = working.width;
+      const h = working.height;
+      if (deg === 90 || deg === 270) {
+        rot.width = h;
+        rot.height = w;
+      } else {
+        rot.width = w;
+        rot.height = h;
+      }
+      const rctx = rot.getContext("2d");
+      rctx.translate(rot.width / 2, rot.height / 2);
+      rctx.rotate((deg * Math.PI) / 180);
+      rctx.drawImage(working, -w / 2, -h / 2);
+      return rot;
+    }
+
     function makeInscribedAvatar(sourceCanvas, canvasSize = 900) {
       const w = sourceCanvas.width;
       const h = sourceCanvas.height;
@@ -481,19 +692,6 @@
       const dataUrl = out.toDataURL("image/jpeg", 0.85);
       const base64 = dataUrl.split(",")[1];
       return { dataUrl, base64 };
-    }
-
-    function formatDisplayName(card, fallback) {
-      const firstName = (card.first_name || "").trim();
-      const lastName = (card.last_name || "").trim();
-      const company = (card.company || "").trim();
-
-      if (lastName && firstName) {
-        if (firstName.startsWith(lastName)) return firstName;
-        const hasCjk = /[\u4e00-\u9fff]/.test(lastName + firstName);
-        return hasCjk ? `${lastName}${firstName}` : `${firstName} ${lastName}`;
-      }
-      return firstName || lastName || company || fallback;
     }
 
     function escapeVcardText(text) {
@@ -529,39 +727,31 @@
       return chunks.join("\r\n");
     }
 
-    function buildVcard(card, base64Photo) {
+    function buildVcard(card, resolvedPostal, cleanAddress, base64Photo) {
       const firstName = (card.first_name || "").trim();
       const lastName = (card.last_name || "").trim();
-      const displayName = formatDisplayName(card, "聯絡人");
       const company = (card.company || "").trim();
       const department = (card.department || "").trim();
-      const title = (card.title || "").trim();
       const mobile = (card.mobile || "").trim();
       const workPhone = (card.work_phone || "").trim();
-      const fax = (card.fax || "").trim();
-      const address = (card.address || "").trim();
       const email = (card.email || "").trim();
-      const website = (card.website || "").trim();
-      const notes = (card.notes || "").trim();
 
       const lines = [
         "BEGIN:VCARD",
         "VERSION:3.0",
         `N;CHARSET=UTF-8:${escapeVcardText(lastName)};${escapeVcardText(firstName)};;;`,
-        `FN;CHARSET=UTF-8:${escapeVcardText(displayName)}`
+        `FN;CHARSET=UTF-8:${escapeVcardText(firstName)}`
       ];
 
       if (company || department) {
         lines.push(`ORG;CHARSET=UTF-8:${escapeVcardText(company)};${escapeVcardText(department)}`);
       }
-      if (title) lines.push(`TITLE;CHARSET=UTF-8:${escapeVcardText(title)}`);
       if (mobile) lines.push(`TEL;TYPE=CELL,VOICE:${mobile}`);
       if (workPhone) lines.push(`TEL;TYPE=WORK,VOICE:${workPhone}`);
-      if (fax) lines.push(`TEL;TYPE=WORK,FAX:${fax}`);
       if (email) lines.push(`EMAIL;TYPE=INTERNET,WORK:${email}`);
-      if (website) lines.push(`URL:${website}`);
-      if (address) lines.push(`ADR;TYPE=WORK;CHARSET=UTF-8:;;${escapeVcardText(address)};;;;`);
-      if (notes) lines.push(`NOTE;CHARSET=UTF-8:${escapeVcardText(notes)}`);
+      if (cleanAddress || resolvedPostal) {
+        lines.push(`ADR;TYPE=WORK;CHARSET=UTF-8:;;${escapeVcardText(cleanAddress)};;;${escapeVcardText(resolvedPostal)};`);
+      }
       if (base64Photo) lines.push(`PHOTO;ENCODING=b;TYPE=JPEG:${base64Photo}`);
 
       lines.push("END:VCARD");
@@ -590,7 +780,7 @@
       return parts.map(p => p.text || "").join("").trim();
     }
 
-    async function callGeminiVision(base64Jpeg, apiKey, model, timeoutMs = 30000) {
+    async function callGeminiVision(base64Jpeg, fileName, pageNum, apiKey, model, timeoutMs = 30000) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
@@ -603,11 +793,14 @@
           },
           signal: controller.signal,
           body: JSON.stringify({
+            system_instruction: {
+              parts: [{ text: SKILL_SYSTEM_INSTRUCTION }]
+            },
             contents: [
               {
                 parts: [
                   { inline_data: { mime_type: "image/jpeg", data: base64Jpeg } },
-                  { text: OCR_PROMPT }
+                  { text: `原檔名：${fileName}，頁面順序：${pageNum}。請依系統規則擷取並正規化所有欄位。` }
                 ]
               }
             ],
@@ -631,28 +824,57 @@
       }
     }
 
+    async function callGeminiVisionWithFallback(base64Jpeg, fileName, pageNum, apiKey, preferredModel, timeoutMs = 30000) {
+      const candidates = [preferredModel].concat(
+        ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash"].filter(m => m !== preferredModel)
+      );
+      let lastErr = null;
+      for (const m of candidates) {
+        try {
+          return await callGeminiVision(base64Jpeg, fileName, pageNum, apiKey, m, timeoutMs);
+        } catch (err) {
+          lastErr = err;
+          const msg = String(err.message || "");
+          if (err.name === "AbortError" || msg.includes("503") || msg.includes("504") || msg.includes("UNAVAILABLE") || msg.includes("DEADLINE_EXCEEDED")) {
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw lastErr || new Error("所有備援模型皆暫時忙碌，請稍後再試");
+    }
+
     function sanitizeFilename(name) {
       return String(name || "contact").replace(/[\\/:*?"<>|]+/g, "_").trim() || "contact";
     }
 
+    let lastCachedCanvases = null;
+
     async function renderVcfResults(cards, cachedCanvases = null) {
       resultsDiv.innerHTML = "";
       batchDownloadArea.innerHTML = "";
+      if (cachedCanvases) lastCachedCanvases = cachedCanvases;
+      const canvasSource = cachedCanvases || lastCachedCanvases;
 
-      const files = Array.from(fileInput.files || []);
-      const pageItems = await buildPageItems(files);
+      const pageItems = await buildPageItems(selectedFiles);
       const allVcfs = [];
 
       for (let i = 0; i < cards.length; i++) {
-        const card = cards[i];
-        const displayName = formatDisplayName(card, `contact_${i + 1}`);
-        const safeName = sanitizeFilename(displayName);
+        const card = normalizeCardBySkill(cards[i]);
+        const { postal, addr } = splitZipAndAddress(card.postal_code, card.address);
+        const resolvedPostal = await resolveZip33(postal, addr);
+        card.postal_code = resolvedPostal;
+        card.address = addr;
+        cards[i] = card;
+
+        const name = (card.first_name || `contact_${i + 1}`).trim();
+        const safeName = sanitizeFilename(name);
         const photoKey = String(card.photo || (i + 1)).trim();
 
         let avatar = null;
         let srcCanvas = null;
-        if (cachedCanvases && /^\d+$/.test(photoKey)) {
-          srcCanvas = cachedCanvases.get(parseInt(photoKey, 10)) || null;
+        if (canvasSource && /^\d+$/.test(photoKey)) {
+          srcCanvas = canvasSource.get(parseInt(photoKey, 10)) || null;
         }
         if (!srcCanvas) {
           const matchedItem = resolvePageItem(photoKey, pageItems);
@@ -661,10 +883,11 @@
           }
         }
         if (srcCanvas) {
-          avatar = makeInscribedAvatar(srcCanvas, 900);
+          const orientedCanvas = cropAndOrientCanvas(srcCanvas, card.box_2d, card.rotate_deg);
+          avatar = makeInscribedAvatar(orientedCanvas, 900);
         }
 
-        const vcfContent = buildVcard(card, avatar ? avatar.base64 : null);
+        const vcfContent = buildVcard(card, resolvedPostal, addr, avatar ? avatar.base64 : null);
         allVcfs.push(vcfContent);
         const blob = new Blob([vcfContent], { type: "text/vcard;charset=utf-8" });
         const blobUrl = URL.createObjectURL(blob);
@@ -678,14 +901,25 @@
           img.src = avatar.dataUrl;
           img.alt = "大頭貼預覽";
           cardEl.appendChild(img);
+
+          const rotateBtn = document.createElement("button");
+          rotateBtn.type = "button";
+          rotateBtn.className = "btn btn-rotate";
+          rotateBtn.textContent = "↻ 旋轉 90°";
+          rotateBtn.addEventListener("click", async () => {
+            cards[i].rotate_deg = (((Number(cards[i].rotate_deg) || 0) + 90) % 360 + 360) % 360;
+            jsonInput.value = JSON.stringify(cards, null, 2);
+            await renderVcfResults(cards);
+          });
+          cardEl.appendChild(rotateBtn);
         }
 
         const nameEl = document.createElement("div");
         nameEl.className = "contact-name";
-        nameEl.textContent = displayName;
+        nameEl.textContent = name;
         cardEl.appendChild(nameEl);
 
-        const orgLine = [card.company, card.department, card.title].filter(Boolean).join(" · ");
+        const orgLine = [card.company, card.department].filter(Boolean).join(" · ");
         if (orgLine) {
           const meta1 = document.createElement("div");
           meta1.className = "contact-meta";
@@ -699,6 +933,28 @@
           meta2.className = "contact-meta";
           meta2.textContent = phoneLine;
           cardEl.appendChild(meta2);
+        }
+
+        const addrDisplay = [resolvedPostal, addr].filter(Boolean).join(" ");
+        if (addrDisplay) {
+          const meta3 = document.createElement("div");
+          meta3.className = "contact-meta";
+          meta3.textContent = `📍 ${addrDisplay}`;
+          cardEl.appendChild(meta3);
+        }
+
+        const enName = String(card.english_name || "").trim();
+        if (enName && !name.includes(enName)) {
+          const mergeBtn = document.createElement("button");
+          mergeBtn.type = "button";
+          mergeBtn.className = "btn btn-english";
+          mergeBtn.textContent = `➕ 偵測到英文名「${enName}」，點此併入名字`;
+          mergeBtn.addEventListener("click", async () => {
+            cards[i].first_name = `${name} ${enName}`;
+            jsonInput.value = JSON.stringify(cards, null, 2);
+            await renderVcfResults(cards);
+          });
+          cardEl.appendChild(mergeBtn);
         }
 
         const dlBtn = document.createElement("a");
@@ -730,9 +986,8 @@
         return;
       }
 
-      const files = Array.from(fileInput.files || []);
-      if (!files.length) {
-        statusText.textContent = "⚠️ 請先選取要掃描的名片 PDF 或圖片";
+      if (!selectedFiles.length) {
+        statusText.textContent = "⚠️ 請先選取名片 PDF / 圖片，或點「📷 直接拍照」";
         return;
       }
 
@@ -747,27 +1002,29 @@
 
       try {
         statusText.textContent = "⏳ 正在展開 PDF / 圖片頁面...";
-        const pageItems = await buildPageItems(files);
+        const pageItems = await buildPageItems(selectedFiles);
         const allCards = [];
         const cachedCanvases = new Map();
 
         for (let idx = 0; idx < pageItems.length; idx++) {
           const pageNum = idx + 1;
+          const item = pageItems[idx];
           statusText.textContent = `🤖 正在透過 ${model} 辨識第 ${pageNum} / ${pageItems.length} 頁...`;
-          const canvas = await renderPageItem(pageItems[idx]);
+          const canvas = await renderPageItem(item);
           cachedCanvases.set(pageNum, canvas);
           const base64Jpeg = compressCanvasForOcr(canvas, 1600, 0.85);
-          const extracted = await callGeminiVision(base64Jpeg, apiKey, model, 30000);
-          for (const c of extracted) {
+          const extracted = await callGeminiVisionWithFallback(base64Jpeg, item.fileName, pageNum, apiKey, model, 30000);
+          for (const rawCard of extracted) {
+            const c = normalizeCardBySkill(rawCard);
             c.photo = String(pageNum);
             allCards.push(c);
           }
         }
 
-        jsonInput.value = JSON.stringify(allCards, null, 2);
-        statusText.textContent = "⏳ 正在製作名片大頭貼與封裝 VCF...";
+        statusText.textContent = "⏳ 正在補齊 3+3 郵遞區號、製作大頭貼與封裝 VCF...";
         await renderVcfResults(allCards, cachedCanvases);
-        statusText.textContent = `✅ 完成！共辨識並產出 ${allCards.length} 筆聯絡人（可直接在上方 JSON 微調後重新產生）`;
+        jsonInput.value = JSON.stringify(allCards, null, 2);
+        statusText.textContent = `✅ 完成！共辨識並產出 ${allCards.length} 筆聯絡人（可確認是否併入英文名或微調 JSON）`;
       } catch (err) {
         console.error(err);
         statusText.textContent = "❌ 辨識失敗：" + (err.name === "AbortError" ? "連線逾時，請稍後再試" : err.message);
@@ -804,6 +1061,7 @@
 
       try {
         await renderVcfResults(cards);
+        jsonInput.value = JSON.stringify(cards, null, 2);
         statusText.textContent = `✅ 完成！共產出 ${cards.length} 筆聯絡人，請點擊下方綠色按鈕匯入`;
       } catch (err) {
         console.error(err);
